@@ -1,65 +1,58 @@
 //create web server
-const express = require('express');
-const app = express();
-const bodyParser = require('body-parser');
-const fs = require('fs');
-const path = require('path');
-const cors = require('cors');
-const port = 3000;
-
-//middleware
-app.use(bodyParser.json());
-app.use(cors());
-
-// read json file
-const commentsPath = path.join(__dirname, 'data/comments.json');
-const comments = JSON.parse(fs.readFileSync(commentsPath, 'utf-8'));
-
-// get all comments
-app.get('/comments', (req, res) => {
-    res.json(comments);
+var express = require('express');
+//create an instance of express
+var app = express();
+//create a server with express
+var server = require('http').createServer(app);
+//create a socket connection
+var io = require('socket.io')(server);
+//create a connection to the database
+var mongoose = require('mongoose');
+//connect to the database
+mongoose.connect('mongodb://localhost/comments');
+//create an instance of the mongoose schema
+var commentSchema = mongoose.Schema({
+    name: String,
+    comment: String
 });
-
-// get single comment
-app.get('/comments/:id', (req, res) => {
-    const comment = comments.find(c => c.id === parseInt(req.params.id));
-    if(!comment) return res.status(404).send('The comment with the given ID was not found.');
-    res.json(comment);
+//create a model for the schema
+var Comment = mongoose.model('Comment', commentSchema);
+//create a route
+app.get('/', function(req, res, next){
+    res.sendFile(__dirname + '/index.html');
 });
-
-// create new comment
-app.post('/comments', (req, res) => {
-    const comment = {
-        id: comments.length + 1,
-        name: req.body.name,
-        comment: req.body.comment
-    };
-    comments.push(comment);
-    fs.writeFileSync(commentsPath, JSON.stringify(comments));
-    res.json(comment);
+//create a route to get comments from the database
+app.get('/comments', function(req, res, next){
+    Comment.find({}, function(err, comments){
+        res.json(comments);
+    });
 });
-
-// update comment
-app.put('/comments/:id', (req, res) => {
-    const comment = comments.find(c => c.id === parseInt(req.params.id));
-    if(!comment) return res.status(404).send('The comment with the given ID was not found.');
-
-    comment.name = req.body.name;
-    comment.comment = req.body.comment;
-    fs.writeFileSync(commentsPath, JSON.stringify(comments));
-    res.json(comment);
+//create a route to post comments to the database
+app.post('/comments', function(req, res, next){
+    var newComment = new Comment(req.body);
+    newComment.save(function(err, comment){
+        io.emit('comment', newComment);
+        res.json(comment);
+    });
 });
-
-// delete comment
-app.delete('/comments/:id', (req, res) => {
-    const comment = comments.find(c => c.id === parseInt(req.params.id));
-    if(!comment) return res.status(404).send('The comment with the given ID was not found.');
-
-    const index = comments.indexOf(comment);
-    comments.splice(index, 1);
-    fs.writeFileSync(commentsPath, JSON.stringify(comments));
-    res.json(comment);
+//listen for connections
+io.on('connection', function(socket){
+    console.log('a user connected');
+    //listen for disconnections
+    socket.on('disconnect', function(){
+        console.log('user disconnected');
+    });
+    //listen for comments
+    socket.on('comment', function(comment){
+        console.log('comment received');
+        //send comment to the database
+        var newComment = new Comment(comment);
+        newComment.save(function(err, comment){
+            io.emit('comment', newComment);
+        });
+    });
 });
-
-// listen to port
-app.listen(port, () => console.log(`Server started on port ${port}...`));
+//listen for connections
+server.listen(3000, function(){
+    console.log('listening on port 3000');
+});
